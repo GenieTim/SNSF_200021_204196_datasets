@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+title: Dataset
+message: >-
+  If you use this dataset, please cite it using the metadata
+  from this file.
+type: dataset
+authors:
+  - given-names: Tim
+    family-names: Bernhard
+    email: tim@bernhard.dev
+    orcid: "https://orcid.org/0009-0002-9227-0173"
+  - given-names: Andrei A.
+    family-names: Gusev
+    email: andrei.gusev@mat.ethz.ch
+    orcid: "https://orcid.org/0000-0002-7075-8111"
+license: CC-BY-4.0
+preferred-citation:
+  - authors:
+      - family-names: Gusev
+        given-names: Andrei A.
+      - family-names: Bernhard
+        given-names: Tim
+    title: "Molecular Model for Linear Viscoelastic Properties of Entangled Polymer Networks"
+    doi: 10.1021/acs.macromol.4c01429
+    type: article
