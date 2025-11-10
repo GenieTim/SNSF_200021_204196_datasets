@@ -9,3 +9,7 @@ There, instead, the scripts and inputs used to generate the data are presented.
 
 Datasets used for publications are available in the folder [./publications](./publications/),
 where they are structured as indicated in the respective README files.
+
+## Questions/Problems
+
+If you are missing something, please contact [snsf-support@bernhard-webstudio.ch](mailto:snsf-support@bernhard-webstudio.ch).
