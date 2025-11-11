@@ -10,8 +10,12 @@ are stored in the long term storage of ETH Zürich and can be acquired upon requ
 
 ## Publications
 
-Datasets used for publications are available in the folder [./publications](./publications/),
+Datasets used for publications are available in the folder [publications](./publications/),
 where they are structured as indicated in the respective README files.
+
+## Software
+
+Software produced and/or contributed to is documented in the folder [software](./software/).
 
 ## Questions/Problems
 
