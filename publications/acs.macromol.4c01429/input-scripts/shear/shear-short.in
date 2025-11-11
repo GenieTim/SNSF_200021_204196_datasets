@@ -1,0 +1,108 @@
+#LAMMPS input file: Calculate the shear stress
+
+units           lj
+atom_style      angle
+special_bonds   fene
+
+bond_style      fene
+
+pair_style	lj/cut 1.12246
+angle_style fourier/simple
+
+read_data       &structure-file
+
+change_box      all triclinic
+
+neighbor        0.5 bin
+neigh_modify    every 5 delay 0 check yes
+
+bond_coeff	1 30.0 1.5 1.0 1.0
+angle_coeff 	1 0.013 -1.0 1.0
+pair_coeff  * * 1.0 1.0 1.12246
+pair_modify     shift yes
+
+fix             1 all nve
+fix             2 all langevin 1.0 1.0 0.5 394710 # zero yes
+
+# prevent errors due to missing angle atoms
+comm_modify     mode single cutoff 3.2 vel yes
+
+# compute tensile/shear stress
+variable        sigt equal -p&deform-dir
+compute stressA all stress/atom NULL
+
+compute pA1 all reduce sum c_stressA[1]
+compute pA2 all reduce sum c_stressA[2]
+compute pA3 all reduce sum c_stressA[3]
+compute pA4 all reduce sum c_stressA[4]
+compute pA5 all reduce sum c_stressA[5]
+compute pA6 all reduce sum c_stressA[6]
+
+variable pxx equal c_pA1*atoms/vol
+variable pyy equal c_pA2*atoms/vol
+variable pzz equal c_pA3*atoms/vol
+variable pxy equal c_pA4*atoms/vol
+variable pxz equal c_pA5*atoms/vol
+variable pyz equal c_pA6*atoms/vol
+
+variable nxya equal v_pxx-v_pyy
+variable nxza equal v_pxx-v_pzz
+variable nyza equal v_pyy-v_pzz
+
+variable nxy equal c_pA1-c_pA2
+variable nxz equal c_pA1-c_pA3
+variable nyz equal c_pA2-c_pA3
+
+variable press equal press
+variable temp equal temp
+variable vol equal vol
+
+thermo_style    custom step temp press v_sigt c_pA1 c_pA2 c_pA3 c_pA4 c_pA5 c_pA6
+# fix 7 all ave/time 2 5000 10000  v_press v_temp v_vol v_lmda mode scalar ave one file &output-folder/&deform-dir/sheared_&deform-dir_&deform-rate_&structure-basename.avg.out
+
+thermo          100
+timestep 0.01 # 0.006
+
+# run some equilibration
+run 10000000 # 1e7
+reset_timestep 0
+
+# prevent errors due to missing angle atoms
+comm_modify     mode single cutoff 4.5 vel yes
+
+# deform the simulation box at a constant rate
+fix             3 all deform 1 &deform-dir erate &deform-rate remap v
+
+timestep &deform-timestep # 0.006
+thermo 1
+
+restart		150000 &output-folder/&deform-dir/sheared_&output-basename.restart.out &output-folder/&deform-dir/sheared_&output-basename.restart2.out
+
+run &deform-steps
+
+unfix 3
+timestep 0.01 # 0.006
+
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 3.25 vel no
+
+fix 6 all ave/time 1 10000 10000  v_sigt c_pA1 c_pA2 c_pA3 c_pA4 c_pA5 c_pA6 mode scalar ave one file &output-folder/&deform-dir/sheared_&output-basename.avg.out
+
+# energy minimization: an attempt to reduce nr of necessary steps
+# minimize 	1.0e-4 1.0e-6 50000 500000
+
+fix 5 all ave/correlate/long 1 50000 v_pxx v_pyy v_pzz v_pxy v_pxz v_pyz v_nxya v_nxza v_nyza type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.times-atoms-ovol.out.correlate.txt
+
+run 10000
+
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 2.1 vel no
+
+thermo 500
+
+# dump coordinates regularly to externally calculate Ree and Rgyr
+dump		1 all custom 2000000 &output-folder/&deform-dir/sheared_&output-basename.dump.out id type x y z ix iy iz # id = atom id, type = atom type, (x|y|z)su are coordinates without periodic boundary scaled by box size
+
+run 10000000 # 1e7
+
+

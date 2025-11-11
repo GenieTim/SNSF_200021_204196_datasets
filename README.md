@@ -5,6 +5,9 @@ Datasets that were created for/during the Swiss National Science Foundation (SNS
 Due to the shear amount of data, some data is only available in processed form.
 There, instead, the scripts and inputs used to generate the data are presented.
 
+The complete dataset and codes acquired in the process of this project (ca. 15 TB) 
+are stored in the long term storage of ETH Zürich and can be acquired upon request.
+
 ## Publications
 
 Datasets used for publications are available in the folder [./publications](./publications/),

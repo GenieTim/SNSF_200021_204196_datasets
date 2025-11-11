@@ -1,0 +1,88 @@
+#LAMMPS input file: Calculate the modulus from autocorrelation
+
+units           lj
+atom_style      angle
+special_bonds   fene
+
+bond_style      fene
+
+pair_style	lj/cut 1.12246
+angle_style fourier/simple
+echo both
+
+read_restart &restart-file
+
+neighbor        0.75 bin
+neigh_modify    every 3 delay 0 check yes
+
+group xlinks type 2
+group strands type 1
+
+bond_coeff	1 30.0 1.5 1.0 1.0
+angle_coeff 	1 0.013 -1.0 1.0
+pair_coeff  * * 1.0 1.0 1.12246
+pair_modify     shift yes
+
+fix             1 all nve
+fix             2 all langevin 1.0 1.0 0.5 &rand-seed # zero yes
+
+# prevent errors due to missing angle atoms
+comm_modify     mode single cutoff 3.2 vel yes
+
+timestep 0.01 # 0.006
+
+# pseudo-equilibration
+run 1000000
+
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 2.4 vel no
+
+# dump coordinates regularly to externally calculate Ree and Rgyr
+dump		1 all custom 2000000 &output-folder/&output-basename.dump.out id type x y z ix iy iz # id = atom id, type = atom type, (x|y|z)su are coordinates without periodic boundary scaled by box size
+
+# compute allBondLen all bond/local dist
+# compute maxBondLen all reduce max c_allBondLen
+# compute aveBondLen all reduce ave c_allBondLen
+
+restart 100000 &output-folder/&output-basename.restart-1.out &output-folder/&output-basename.restart-2.out
+
+# compute stresses
+compute pA all pressure thermo_temp
+# compute pC xlinks pressure thermo_temp
+# compute pS strands pressure thermo_temp
+compute stressA all stress/atom thermo_temp
+compute pC xlinks reduce sum c_stressA[*6]
+compute pS strands reduce sum c_stressA[*6]
+
+thermo_style    custom step temp vol press c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] 
+thermo 200
+
+variable nxy equal c_pA[1]-c_pA[2]
+variable nxz equal c_pA[1]-c_pA[3]
+variable nyz equal c_pA[2]-c_pA[3]
+
+variable ncxy equal c_pC[1]-c_pC[2]
+variable ncxz equal c_pC[1]-c_pC[3]
+variable ncyz equal c_pC[2]-c_pC[3]
+
+variable nsxy equal c_pS[1]-c_pS[2]
+variable nsxz equal c_pS[1]-c_pS[3]
+variable nsyz equal c_pS[2]-c_pS[3]
+
+fix 5 all ave/correlate/long 1 500000 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_nxy v_nxz v_nyz type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.out.correlate-withkin.txt
+
+fix 7 all ave/time 1 5000 5000 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_nxy v_nxz v_nyz mode scalar ave one file &output-folder/&output-basename.out.ave-withkin.txt
+
+fix 9 all ave/correlate/long 1 500000 c_pS[1] c_pS[2] c_pS[3] c_pS[4] c_pS[5] c_pS[6] v_nsxy v_nsxz v_nsyz type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.strands.out.correlate-withkin.txt
+
+fix 11 all ave/time 1 5000 5000 c_pS[1] c_pS[2] c_pS[3] c_pS[4] c_pS[5] c_pS[6] v_nsxy v_nsxz v_nsyz mode scalar ave one file &output-folder/&output-basename.strands.out.ave-withkin.txt
+
+fix 13 all ave/correlate/long 1 500000 c_pC[1] c_pC[2] c_pC[3] c_pC[4] c_pC[5] c_pC[6] v_ncxy v_ncxz v_ncyz type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.xlinks.out.correlate-withkin.txt
+
+fix 15 all ave/time 1 5000 5000 c_pC[1] c_pC[2] c_pC[3] c_pC[4] c_pC[5] c_pC[6] v_ncxy v_ncxz v_ncyz mode scalar ave one file &output-folder/&output-basename.xlinks.out.ave-withkin.txt
+
+fix 17 all ave/correlate/long 1 500000 c_pS[1] c_pC[1] c_pS[2] c_pC[2] c_pS[3] c_pC[3] c_pS[4] c_pC[4] c_pS[5] c_pC[5] c_pS[6] c_pC[6] v_nsxy v_ncxy v_nsxz v_ncxz v_nsyz v_ncyz type upper nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.strands-xlinks.out.correlate-withkin.txt
+
+fix 19 all ave/correlate/long 1 500000 c_pS[1] c_pC[1] c_pS[2] c_pC[2] c_pS[3] c_pC[3] c_pS[4] c_pC[4] c_pS[5] c_pC[5] c_pS[6] c_pC[6] v_nsxy v_ncxy v_nsxz v_ncxz v_nsyz v_ncyz type lower nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.xlinks-strands.out.correlate-withkin.txt
+
+run 200000001 # 2e8 sampling

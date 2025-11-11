@@ -1,0 +1,88 @@
+#LAMMPS input file: Calculate the shear stress
+
+units           lj
+atom_style      angle
+special_bonds   fene
+
+bond_style      fene
+
+pair_style	lj/cut 1.12246
+angle_style fourier/simple
+
+read_data       &structure-file
+
+change_box      all triclinic
+
+neighbor        0.95 bin
+neigh_modify    every 2 delay 0 check yes
+
+bond_coeff	1 30.0 1.5 1.0 1.0
+angle_coeff 	1 0.013 -1.0 1.0
+pair_coeff  * * 1.0 1.0 1.12246
+pair_modify     shift yes
+
+fix             1 all nve
+fix             2 all langevin 1.0 1.0 0.5 394710 # zero yes
+
+# prevent errors due to missing angle atoms
+comm_modify     mode single cutoff 3.2 vel yes
+
+# compute tensile/shear stress
+variable        sigt equal -p&deform-dir
+compute stressA all stress/atom NULL
+
+compute pA all pressure thermo_temp
+
+thermo_style    custom step temp press v_sigt c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6]
+# fix 7 all ave/time 2 5000 10000  v_press v_temp v_vol v_lmda mode scalar ave one file &output-folder/&deform-dir/sheared_&deform-dir_&deform-rate_&structure-basename.avg.out
+
+thermo          100
+timestep 0.01 # 0.006
+
+# run some equilibration
+run 500000 # 5e5
+reset_timestep 0
+
+# prevent errors due to missing angle atoms
+comm_modify     mode single cutoff 4.5 vel yes
+
+# output the stresses
+fix 5 all ave/time 1 1 1 v_sigt c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] mode scalar ave one file &output-folder/&deform-dir/&output-basename-deforming.out.press.txt
+
+# deform the simulation box at a constant rate
+fix             3 all deform 1 &deform-dir erate &deform-rate remap v
+
+timestep &deform-timestep # 0.006
+thermo 1
+
+restart		150000 &output-folder/&deform-dir/sheared_&output-basename.restart.out &output-folder/&deform-dir/sheared_&output-basename.restart2.out
+
+run &deform-steps
+
+unfix 3
+unfix 5
+timestep 0.01 # 0.006
+
+# output the stresses
+fix 7 all ave/time 1 1 1 v_sigt c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] mode scalar ave one file &output-folder/&deform-dir/&output-basename-deformed.out.press.txt
+
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 3.25 vel no
+
+# fix 6 all ave/time 1 10000 10000  v_sigt c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] mode scalar ave one file &output-folder/&deform-dir/sheared_&output-basename.avg.out
+
+# energy minimization: an attempt to reduce nr of necessary steps
+# minimize 	1.0e-4 1.0e-6 50000 500000
+
+run 10000
+
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 2.1 vel no
+
+thermo 500
+
+# dump coordinates regularly to externally calculate Ree and Rgyr
+dump		1 all custom 2000000 &output-folder/&deform-dir/sheared_&output-basename.dump.out id type x y z ix iy iz # id = atom id, type = atom type, (x|y|z)su are coordinates without periodic boundary scaled by box size
+
+run 100000000 # 1e8
+

@@ -1,0 +1,122 @@
+#LAMMPS input file: Calculate the modulus from autocorrelation
+
+units           lj
+atom_style      angle
+special_bonds   fene
+
+bond_style      fene
+
+pair_style	lj/cut 1.12246
+angle_style fourier/simple
+echo both
+
+read_data       &structure-file
+
+change_box      all triclinic
+
+neighbor        0.95 bin
+neigh_modify    every 2 delay 0 check yes
+
+bond_coeff	1 30.0 1.5 1.0 1.0
+angle_coeff 	1 0.013 -1.0 1.0
+pair_coeff  * * 1.0 1.0 1.12246
+pair_modify     shift yes
+
+fix             1 all nve
+fix             2 all langevin 1.0 1.0 0.5 394710 # zero yes
+
+# prevent errors due to missing angle atoms
+comm_modify     mode single cutoff 3.2 vel yes
+
+timestep 0.01 # 0.006
+
+# pseudo-equilibration
+run 10000000 # 1e7
+reset_timestep 0
+
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 2.5 vel no
+
+# dump coordinates regularly to externally calculate Ree and Rgyr
+dump		1 all custom 5000000 &output-folder/&output-basename.dump.out id type x y z ix iy iz # id = atom id, type = atom type, (x|y|z)su are coordinates without periodic boundary scaled by box size
+
+compute allBondLen all bond/local dist
+compute maxBondLen all reduce max c_allBondLen
+compute aveBondLen all reduce ave c_allBondLen
+
+restart 100000 &output-folder/&output-basename.restart-1.out &output-folder/&output-basename.restart-2.out
+
+# compute stresses
+compute stressA all stress/atom NULL
+
+compute pA all reduce ave c_stressA[*6]
+compute pAveSq all reduce avesq c_stressA[*6]
+compute pSumSq all reduce sumsq c_stressA[*6]
+
+# cache values
+fix pAcache all ave/time 1 1 1 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] mode scalar
+fix pAveSqcache all ave/time 1 1 1 c_pAveSq[1] c_pAveSq[2] c_pAveSq[3] c_pAveSq[4] c_pAveSq[5] c_pAveSq[6] mode scalar
+fix pSumSqcache all ave/time 1 1 1 c_pSumSq[1] c_pSumSq[2] c_pSumSq[3] c_pSumSq[4] c_pSumSq[5] c_pSumSq[6] mode scalar
+
+variable pA1 equal f_pAcache[1]
+variable pA2 equal f_pAcache[2]
+variable pA3 equal f_pAcache[3]
+variable pA4 equal f_pAcache[4]
+variable pA5 equal f_pAcache[5]
+variable pA6 equal f_pAcache[6]
+
+variable pA12 equal v_pA1^2
+variable pA22 equal v_pA2^2
+variable pA32 equal v_pA3^2
+variable pA42 equal v_pA4^2
+variable pA52 equal v_pA5^2
+variable pA62 equal v_pA6^2
+
+variable pxx equal v_pA1*atoms/vol
+variable pyy equal v_pA2*atoms/vol
+variable pzz equal v_pA3*atoms/vol
+variable pxy equal v_pA4*atoms/vol
+variable pxz equal v_pA5*atoms/vol
+variable pyz equal v_pA6*atoms/vol
+
+variable nxya equal v_pxx-v_pyy
+variable nxza equal v_pxx-v_pzz
+variable nyza equal v_pyy-v_pzz
+
+variable nxy equal v_pA1-v_pA2
+variable nxz equal v_pA1-v_pA3
+variable nyz equal v_pA2-v_pA3
+
+compute moleculeChunks all chunk/atom molecule
+compute moleculeGyration all gyration/chunk moleculeChunks
+compute moleculeMsd all msd/chunk moleculeChunks
+
+variable squareGyr vector "c_moleculeGyration * c_moleculeGyration"
+variable meanGyr2 equal "ave(v_squareGyr)"
+variable meanGyr equal ave(c_moleculeGyration)
+
+compute allMsd0 all msd com yes average no
+
+fix 5 all ave/correlate/long 1 5000 v_pxx v_pyy v_pzz v_pxy v_pxz v_pyz v_nxya v_nxza v_nyza type auto nlen 16 ncount 2 ncorr 32 file &output-folder/&output-basename-vn.times-atoms-ovol.out.correlate.txt
+fix 6 all ave/correlate/long 1 50000 v_pA1 v_pA2 v_pA3 v_pA4 v_pA5 v_pA6 v_nxy v_nxz v_nyz type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.out.correlate.txt
+# compute the variance as = sumsq - ave^2
+# putting another average on top is probably not ideal, 
+# but let's take what we can get with reasonable effort and output
+fix 7 all ave/time 1 2000 2000  v_pA1 v_pA2 v_pA3 v_pA4 v_pA5 v_pA6 f_pAveSqcache[1] f_pAveSqcache[2] f_pAveSqcache[3] f_pAveSqcache[4] f_pAveSqcache[5] f_pAveSqcache[6] f_pSumSqcache[1] f_pSumSqcache[2] f_pSumSqcache[3] f_pSumSqcache[4] f_pSumSqcache[5] f_pSumSqcache[6] v_pA12 v_pA22 v_pA32 v_pA42 v_pA52 v_pA62 mode scalar ave one file &output-folder/&output-basename-vn.out.avg.txt
+# fix 8 all ave/time 100 20 2000 c_moleculeGyration c_moleculeMsd[*] file &output-folder/&output-basename-vn.out.vec-avg.txt mode vector
+
+
+thermo_style    custom step temp vol press c_maxBondLen c_aveBondLen c_allMsd0[4] v_meanGyr v_meanGyr2 v_pA1 v_pA2 v_pA3 v_pA4 v_pA5 v_pA6
+
+thermo 1
+run 50000
+
+thermo 10
+
+variable c loop 40000 # loop often enough to output the memory usage often enough
+label loop1
+run 500000
+thermo 20
+next c
+jump SELF loop1
+label loopexit1

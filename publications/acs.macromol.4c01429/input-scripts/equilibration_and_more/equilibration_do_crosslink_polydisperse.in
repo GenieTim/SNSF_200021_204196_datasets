@@ -1,0 +1,101 @@
+#LAMMPS input file: Calculate the modulus from autocorrelation
+
+units           lj
+atom_style      angle
+special_bonds   fene
+
+bond_style      fene
+
+pair_style	lj/cut 1.12246
+angle_style fourier/simple
+echo both
+
+read_data       &structure-file extra/bond/per/atom 4 extra/special/per/atom 48 extra/angle/per/atom 8 
+
+change_box      all triclinic
+
+neighbor        0.95 bin
+neigh_modify    every 2 delay 0 check yes
+
+bond_coeff	1 30.0 1.5 1.0 1.0
+angle_coeff 	1 0.013 -1.0 1.0
+pair_coeff  * * 1.0 1.0 1.12246
+pair_modify     shift yes
+
+fix             1 all nve
+fix             2 all langevin 1.0 1.0 0.5 394710 # zero yes
+
+group xlinks type 2
+
+# prevent errors due to missing angle atoms
+comm_modify     mode single cutoff 3.2 vel yes
+
+minimize 	1.0e-8 1.0e-10 10000 100000
+
+timestep 0.001
+thermo 10
+run 10000
+
+timestep 0.01 # 0.006
+
+# pseudo-equilibration
+thermo 50
+run 10000000 # 1e7
+reset_timestep 0
+
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 2.5 vel no
+
+# dump coordinates regularly to externally calculate Ree and Rgyr
+dump		1 all custom 750000 &output-folder/&output-basename.dump.out id type x y z ix iy iz # id = atom id, type = atom type, (x|y|z)su are coordinates without periodic boundary scaled by box size
+
+compute allBondLen all bond/local dist
+compute maxBondLen all reduce max c_allBondLen
+compute aveBondLen all reduce ave c_allBondLen
+
+restart 100000 &output-folder/&output-basename.restart-1.out &output-folder/&output-basename.restart-2.out
+
+# compute stresses
+# compute stressA all stress/atom NULL
+# compute pA all reduce ave c_stressA[*6]
+compute pA all pressure thermo_temp
+compute pAv all pressure NULL virial
+
+compute allMsd0 all msd com yes average no
+
+
+thermo 100
+run 100000000 # 1e8 equilibration
+
+# compute degree of convergence
+compute nxlinks all count/type atom
+variable nxlinks equal c_nxlinks[2]
+compute		bondsperatom all property/atom nbonds
+compute		nbonds all reduce sum c_bondsperatom
+variable nbonds0 equal c_nbonds
+variable	xlinkerConversion equal (c_nbonds-${nbonds0})/(4*${nxlinks})
+variable chainConversion equal (c_nbonds-${nbonds0})/(2*&nchains)
+
+variable tstep equal step
+
+write_data &output-folder/t-${tstep}-&output-basename.structure.out
+
+thermo_style    custom step temp vol press c_maxBondLen c_aveBondLen c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_xlinkerConversion
+
+comm_modify     mode single cutoff 2.75 vel no
+
+# start cross-linking
+# add bonds
+fix 7 all bond/create 25 1 2 1.1 1 iparam 2 1 jparam 4 2 atype 1
+
+variable z loop 1000000 # output often, to have structures of each p
+label loop0
+run 50
+write_data &output-folder/crosslinked/polydisperse/crosslinked_p_${xlinkerConversion}_&output-basename.structure.out
+if "${xlinkerConversion}>0.995" then "jump SELF loopexit0"
+if "${chainConversion}>0.995" then "jump SELF loopexit0"
+next z
+jump SELF loop0
+label loopexit0
+
+write_data &output-folder/crosslinked/polydisperse/crosslinked_p_${xlinkerConversion}_&output-basename.structure.out

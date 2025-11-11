@@ -1,0 +1,66 @@
+#LAMMPS input file: Calculate the modulus from autocorrelation
+
+units           lj
+atom_style      angle
+special_bonds   fene
+
+bond_style      fene
+
+pair_style	lj/cut 1.12246
+angle_style fourier/simple
+echo both
+
+read_restart &restart-file
+
+neighbor        0.75 bin
+neigh_modify    every 3 delay 0 check yes
+
+bond_coeff	1 30.0 1.5 1.0 1.0
+angle_coeff 	1 0.013 -1.0 1.0
+pair_coeff  * * 1.0 1.0 1.12246
+pair_modify     shift yes
+
+fix             1 all nve
+fix             2 all langevin 1.0 1.0 0.5 &rand-seed # zero yes
+
+timestep 0.01
+
+# we can reduce comm req. for performance
+comm_modify     mode single cutoff 2.4 vel no
+
+# dump coordinates regularly to externally calculate Ree and Rgyr
+dump		1 all custom 2000000 &output-folder/&output-basename.dump.out id type x y z ix iy iz # id = atom id, type = atom type, (x|y|z)su are coordinates without periodic boundary scaled by box size
+
+# compute allBondLen all bond/local dist
+# compute maxBondLen all reduce max c_allBondLen
+# compute aveBondLen all reduce ave c_allBondLen
+
+restart 100000 &output-folder/&output-basename.restart-1.out &output-folder/&output-basename.restart-2.out
+
+# compute stresses
+compute pA all pressure thermo_temp
+compute pAv all pressure NULL virial
+
+thermo_style    custom step temp vol press c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] 
+thermo 200
+
+variable nxy equal c_pA[1]-c_pA[2]
+variable nxz equal c_pA[1]-c_pA[3]
+variable nyz equal c_pA[2]-c_pA[3]
+
+variable nxyv equal c_pAv[1]-c_pAv[2]
+variable nxzv equal c_pAv[1]-c_pAv[3]
+variable nyzv equal c_pAv[2]-c_pAv[3]
+
+# continue previous
+fix 9 all ave/correlate/long 1 500000 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_nxy v_nxz v_nyz type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&previous-basename-x3.out.correlate-withkin.txt
+# fix 10 all ave/correlate/long 1 500000 c_pAv[1] c_pAv[2] c_pAv[3] c_pAv[4] c_pAv[5] c_pAv[6] v_nxyv v_nxzv v_nyzv type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&previous-basename.out.correlate.txt
+
+# start anew
+fix 11 all ave/correlate/long 1 500000 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_nxy v_nxz v_nyz type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.out.correlate-withkin.txt
+# fix 12 all ave/correlate/long 1 500000 c_pAv[1] c_pAv[2] c_pAv[3] c_pAv[4] c_pAv[5] c_pAv[6] v_nxyv v_nxzv v_nyzv type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.out.correlate.txt
+
+fix 7 all ave/time 1 5000 5000 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_nxy v_nxz v_nyz mode scalar ave one file &output-folder/&output-basename.out.ave-withkin.txt
+fix 8 all ave/time 1 5000 5000 c_pAv[1] c_pAv[2] c_pAv[3] c_pAv[4] c_pAv[5] c_pAv[6] v_nxyv v_nxzv v_nyzv mode scalar ave one file &output-folder/&output-basename.out.ave.txt
+
+run 800000001 # 8e8 sampling

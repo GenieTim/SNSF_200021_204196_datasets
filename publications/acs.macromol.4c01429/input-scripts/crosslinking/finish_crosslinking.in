@@ -1,0 +1,98 @@
+# LAMMPS input script that does cross-linking for p = 1
+units           lj
+atom_style      angle
+special_bonds   fene
+
+bond_style      fene
+
+pair_style	lj/cut 1.12246
+angle_style fourier/simple
+echo both
+
+read_restart &restart-file
+
+neighbor        0.95 bin
+neigh_modify    every 2 delay 0 check yes
+
+bond_coeff	1 30.0 1.5 1.0 1.0
+angle_coeff 	1 0.013 -1.0 1.0
+pair_coeff  * * 1.0 1.0 1.12246
+pair_modify     shift yes
+
+fix             1 all nve
+fix             2 all langevin 1.0 1.0 0.5 &rand-seed # zero yes
+
+timestep 0.01
+group xlinks type 2
+group strands type 1
+run 10
+
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 2.75 vel no
+
+# compute allBondLen all bond/local dist
+# compute maxBondLen all reduce max c_allBondLen
+# compute aveBondLen all reduce ave c_allBondLen
+
+restart 100000 &output-folder/&output-basename.restart-1.out &output-folder/&output-basename.restart-2.out
+
+# compute degree of convergence
+compute nxlinks all count/type atom
+variable nxlinks equal c_nxlinks[2]
+variable numBondsOfStrands equal (&nchains*(&nAtomsPerChain-1))
+variable xlinkerConversion equal (bonds-v_numBondsOfStrands)/(&nxlinks*4)
+variable chainConversion equal (bonds-v_numBondsOfStrands)/(&nchains*2)
+
+run 10
+
+# take max
+variable relevantConversion equal (v_xlinkerConversion*(v_xlinkerConversion>v_chainConversion)+v_chainConversion*(v_chainConversion>=v_xlinkerConversion))
+# take mean
+variable irrelevantConversion equal (v_xlinkerConversion*(v_xlinkerConversion<v_chainConversion)+v_chainConversion*(v_chainConversion<=v_xlinkerConversion))
+
+variable tstep equal step
+run 10
+
+thermo_style    custom step temp vol press v_xlinkerConversion v_chainConversion v_nxlinks
+
+thermo 100
+
+# start cross-linking
+# add bonds
+fix 7 all bond/create 25 1 2 1.1 1 iparam 2 1 jparam 4 2 atype 1
+
+
+variable d loop 100000 # output often in the beginning, when lots of bonds are made
+label loop4
+run 500
+if "${xlinkerConversion}>=0.98" then "jump SELF loopexit4"
+if "${chainConversion}>=0.98" then "jump SELF loopexit4"
+next d
+jump SELF loop4
+label loopexit4
+
+run 1
+write_data &output-folder/crosslinked/crosslinked_p_${relevantConversion}_${irrelevantConversion}_&output-basename.structure.out
+
+# run as long as needed to reach full extent of reaction
+variable d loop 100000 # output often in the beginning, when lots of bonds are made
+label loop5
+run 5000
+if "${xlinkerConversion}>=1.0" then "jump SELF loopexit6"
+if "${chainConversion}>=1.0" then "jump SELF loopexit6"
+next d
+jump SELF loop5
+
+unfix 7
+fix 7 all bond/create 5 1 2 1.1 1 iparam 2 1 jparam 4 2 atype 1
+
+variable e loop 5000 # output often in the beginning, when lots of bonds are made
+label loop6
+run 500000
+if "${xlinkerConversion}>=1.0" then "jump SELF loopexit6"
+if "${chainConversion}>=1.0" then "jump SELF loopexit6"
+next e
+jump SELF loop6
+label loopexit6
+
+write_data &output-folder/crosslinked/crosslinked_p_${relevantConversion}_${irrelevantConversion}_&output-basename.structure.out

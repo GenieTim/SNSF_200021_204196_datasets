@@ -1,0 +1,172 @@
+#LAMMPS input file: Calculate the modulus from autocorrelation
+
+units           lj
+atom_style      angle
+special_bonds   fene
+
+bond_style      fene
+
+pair_style	lj/cut 1.12246
+angle_style zero nocoeff
+echo both
+
+read_data       &structure-file
+
+neighbor        0.75 bin
+neigh_modify    every 3 delay 0 check yes
+
+bond_coeff	1 30.0 1.5 1.0 1.0
+angle_coeff *
+pair_coeff  * * 1.0 1.0 1.12246
+pair_modify     shift yes
+
+fix             1 all nve
+fix             2 all langevin 1.0 1.0 0.5 &rand-seed # zero yes
+
+# prevent errors due to missing angle atoms
+comm_modify     mode single cutoff 3.2 vel yes
+
+minimize 	1.0e-8 1.0e-10 10000 100000
+
+timestep 0.001
+thermo 10
+run 10000
+
+timestep 0.01 # 0.006
+
+# some additional computes
+compute moleculeChunks all chunk/atom molecule
+compute moleculeGyration all gyration/chunk moleculeChunks
+compute moleculeMsd all msd/chunk moleculeChunks
+compute moleculeCom all com/chunk moleculeChunks
+
+fix test all ave/time 100 1 100 c_moleculeCom[*] file tmp.out mode vector
+run 100
+unfix test
+
+# make groups of atoms whose coordinates we want
+group centralBeads type 5
+group endBeads type 6
+
+# intermezzo: equilibration
+restart 100000 &output-folder/&output-basename.restart-1.out &output-folder/&output-basename.restart-2.out
+
+thermo 500
+# equilibration
+run 50000000 # 5e7
+comm_modify     mode single cutoff 2.9 vel no
+run 50000000 # 5e7
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 2.5 vel no
+
+# property we need
+compute pos all property/atom xu yu zu
+# assign one chunk per atom
+compute centralBeadIds centralBeads property/atom id
+compute centralAtomChunks centralBeads chunk/atom c_centralBeadIds ids once nchunk once discard yes compress yes
+compute endBeadIds endBeads property/atom id
+compute endAtomChunks endBeads chunk/atom c_endBeadIds ids once nchunk once discard yes compress yes
+
+# turn the per/atom values into a global (chunk) vector
+fix globalCentralPos centralBeads ave/chunk 1 1 1 centralAtomChunks c_pos[1] c_pos[2] c_pos[3]
+# fix globalEndPos endBeads ave/chunk 1 1 1 endAtomChunks c_pos[1] c_pos[2] c_pos[3]
+
+variable globalCentralX vector f_globalCentralPos[3]
+variable globalCentralY vector f_globalCentralPos[4]
+variable globalCentralZ vector f_globalCentralPos[5]
+
+# variable globalEndX vector f_globalEndPos[3]
+# variable globalEndY vector f_globalEndPos[4]
+# variable globalEndZ vector f_globalEndPos[5]
+
+variable globalComX vector c_moleculeCom[1]
+variable globalComY vector c_moleculeCom[2]
+variable globalComZ vector c_moleculeCom[3]
+
+variable globalCentralX2 vector f_globalCentralPos[3]^2
+variable globalCentralY2 vector f_globalCentralPos[4]^2
+variable globalCentralZ2 vector f_globalCentralPos[5]^2
+
+# variable globalEndX2 vector f_globalEndPos[3]^2
+# variable globalEndY2 vector f_globalEndPos[4]^2
+# variable globalEndZ2 vector f_globalEndPos[5]^2
+
+variable globalComX2 vector c_moleculeCom[1]^2
+variable globalComY2 vector c_moleculeCom[2]^2
+variable globalComZ2 vector c_moleculeCom[3]^2
+
+# finally, actually conduct the autocorrelation of the position for all the selected atoms
+fix centralPosCorr centralBeads ave/correlate/long 1 1000000 v_globalCentralX[*&numBeadsType5] v_globalCentralY[*&numBeadsType5] v_globalCentralZ[*&numBeadsType5] type auto nlen 16 ncount 2 ncorr 30 nonaveraged file &output-folder/&output-basename.autocorr-of-central-beads.out.nonavg-correlate.txt
+# fix endPosCorr endBeads ave/correlate/long 1 1000000 v_globalEndX[*&numBeadsType6] v_globalEndY[*&numBeadsType6] v_globalEndZ[*&numBeadsType6] type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.autocorr-of-end-beads.out.correlate.txt
+fix comPosCorr all ave/correlate/long 1 1000000 v_globalComX[*&nchains] v_globalComY[*&nchains] v_globalComZ[*&nchains] type auto nlen 16 ncount 2 ncorr 30 nonaveraged file &output-folder/&output-basename.autocorr-of-com.out.nonavg-correlate.txt
+
+# also, for the formula, we also need the mean(^2)
+fix centralOutPos centralBeads ave/time 1 1000000 1000000 v_globalCentralX2 v_globalCentralY2 v_globalCentralZ2 file &output-folder/&output-basename.square-pos-of-central-beads.out-vec.txt mode vector
+# fix endOutPos endBeads ave/time 1 1000000 1000000 v_globalEndX2 v_globalEndY2 v_globalEndZ2 file &output-folder/&output-basename.square-pos-of-end-beads.out-vec.txt mode vector
+fix comOutPos endBeads ave/time 1 1000000 1000000 v_globalComX2 v_globalComY2 v_globalComZ2 file &output-folder/&output-basename.square-pos-of-com.out-vec.txt mode vector
+
+# compute stresses
+compute pA all pressure thermo_temp
+
+thermo_style    custom step temp vol press c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] 
+thermo 500
+
+variable nxy equal c_pA[1]-c_pA[2]
+variable nxz equal c_pA[1]-c_pA[3]
+variable nyz equal c_pA[2]-c_pA[3]
+
+# distribute the com to all atoms to dump them afterwards
+compute comSpread centralBeads chunk/spread/atom moleculeChunks c_moleculeCom[*]
+
+# output coordinates in order to later verify the g_mid
+dump		1 all custom 750000 &output-folder/&output-basename.dump.out id type x y z ix iy iz # id = atom id, type = atom type, (x|y|z)su are coordinates without periodic boundary scaled by box size
+dump		2 centralBeads custom 10 &output-folder/&output-basename.cm-dump.out id x y z ix iy iz c_comSpread[*] # id = atom id, type = atom type, (x|y|z)su are coordinates without periodic boundary scaled by box size
+dump		3 endBeads custom 10 &output-folder/&output-basename.em-dump.out id x y z ix iy iz # id = atom id, type = atom type, (x|y|z)su are coordinates without periodic boundary scaled by box size
+fix 99 all ave/time 1 1 1 c_moleculeGyration c_moleculeMsd[*] c_moleculeCom[*] file &output-folder/&output-basename.out.vec-avg.txt mode vector
+
+fix 5 all ave/correlate/long 1 1000000 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_nxy v_nxz v_nyz type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.out.correlate-withkin.txt
+fix 7 all ave/time 1 5000 5000 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_nxy v_nxz v_nyz mode scalar ave one file &output-folder/&output-basename.out.ave-withkin.txt
+# output stress every step to verify multi-tau method
+# fix everyStress all ave/time 1 1 1 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] mode scalar ave one file &output-folder/&output-basename.out.press-withkin.txt
+
+dump_modify 2 every 1 append yes
+dump_modify 3 every 1 append yes
+run 10000 # 1e4
+unfix 99
+dump_modify 2 every 10 append yes
+dump_modify 3 every 10 append yes
+run 50000 # 5e4
+dump_modify 2 every 100 append yes
+dump_modify 3 every 100 append yes
+run 500000 # 5e5
+dump_modify 2 every 1000 append yes
+dump_modify 3 every 1000 append yes
+run 5000000 # 5e6
+dump_modify 2 every 10000 append yes
+dump_modify 3 every 10000 append yes
+run 94430000 # -> 1e8 sampling
+# run 100000001 # 1e8 sampling
+
+dump_modify 2 every 1 append yes
+dump_modify 3 every 1 append yes
+run 10000 # 1e4
+dump_modify 2 every 10000 append yes
+dump_modify 3 every 10000 append yes
+
+unfix 5
+# unfix everyStress
+unfix 7
+
+unfix centralPosCorr
+# unfix endPosCorr
+unfix comPosCorr
+
+fix centralPosCorr2 centralBeads ave/correlate/long 1 1000000 v_globalCentralX[*&numBeadsType5] v_globalCentralY[*&numBeadsType5] v_globalCentralZ[*&numBeadsType5] type auto nlen 16 ncount 2 ncorr 30 nonaveraged file &output-folder/&output-basename.autocorr-of-central-beads_long.out.nonavg-correlate.txt
+# fix endPosCorr2 endBeads ave/correlate/long 1 1000000 v_globalEndX[*&numBeadsType6] v_globalEndY[*&numBeadsType6] v_globalEndZ[*&numBeadsType6] type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename.autocorr-of-end-beads_long.out.correlate.txt
+fix comPosCorr2 all ave/correlate/long 1 1000000 v_globalComX[*&nchains] v_globalComY[*&nchains] v_globalComZ[*&nchains] type auto nlen 16 ncount 2 ncorr 30 nonaveraged file &output-folder/&output-basename.autocorr-of-com_long.out.nonavg-correlate.txt
+
+fix 6 all ave/correlate/long 1 1000000 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_nxy v_nxz v_nyz type auto nlen 16 ncount 2 ncorr 30 file &output-folder/&output-basename_long.out.correlate-withkin.txt
+fix 8 all ave/time 1 5000 5000 c_pA[1] c_pA[2] c_pA[3] c_pA[4] c_pA[5] c_pA[6] v_nxy v_nxz v_nyz mode scalar ave one file &output-folder/&output-basename_long.out.ave-withkin.txt
+
+run 200000001 # 2e8 sampling
+dump_modify 2 every 10000 append yes
