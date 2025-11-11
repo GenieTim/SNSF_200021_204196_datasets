@@ -1,14 +1,12 @@
 #!/usr/bin/env python
 import os
 
-import matplotlib
 import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MultipleLocator
 from pylimer_doctorate_utils.saveFigure import (addMinorTicks, saveFigure,
                                                 setupFigure)
 
-import util
 
 base_dir = os.path.join(os.path.dirname(__file__))
 

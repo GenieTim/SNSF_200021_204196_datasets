@@ -12,4 +12,5 @@ where they are structured as indicated in the respective README files.
 
 ## Questions/Problems
 
-If you are missing something, please contact [snsf-support@bernhard-webstudio.ch](mailto:snsf-support@bernhard-webstudio.ch).
+If you are missing something, or would like to request the original data and/or structures, 
+please contact [snsf-support@bernhard-webstudio.ch](mailto:snsf-support@bernhard-webstudio.ch).

@@ -15,7 +15,7 @@ import util
 base_dir = os.path.join(os.path.dirname(__file__))
 
 data = pd.read_csv(
-    os.path.join(base_dir, "all-structures-r-sharaf-wsol-sharaf-without-wsol.csv")
+    os.path.join(base_dir, "..", "processed-data", "all-structures-r-sharaf-wsol-sharaf-without-wsol.csv")
 )
 
 # Setup subplot figure
