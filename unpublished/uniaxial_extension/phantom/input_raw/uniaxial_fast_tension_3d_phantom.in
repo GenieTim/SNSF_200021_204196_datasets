@@ -1,0 +1,70 @@
+#LAMMPS input file: Calculate the shear stress(es)
+
+units		nano
+atom_style	bond
+
+bond_style      harmonic
+pair_style      none
+
+read_data       INPUT_FILE
+
+group crosslinkers type 2
+change_box      all triclinic
+
+neighbor        0.4 bin
+neigh_modify    every 1 delay 1
+
+variable k equal 1.380649e-2*TEMPERATURE
+# variable	k equal 4.1419333334  # ag / ns^2
+variable	r0 equal 0	# nm
+bond_coeff * ${k} ${r0}
+
+# no non-bonded interactions
+comm_modify     mode single cutoff 7.5 vel no
+
+# energy minimization
+minimize 	1.0e-4 1.0e-6 50000 500000
+
+fix		1 all nve
+fix		2 all langevin TEMPERATURE TEMPERATURE 0.005 904297
+#fix		2 all temp/berendsen 300 300 0.005
+fix 6 all recenter INIT INIT NULL
+
+# compute tensile/shear stress
+variable        sigt equal -pINPUT_DIR1INPUT_DIR1
+compute stressA all stress/atom NULL
+
+compute pA1 all reduce sum c_stressA[1]
+compute pA2 all reduce sum c_stressA[2]
+compute pA3 all reduce sum c_stressA[3]
+compute pA4 all reduce sum c_stressA[4]
+compute pA5 all reduce sum c_stressA[5]
+compute pA6 all reduce sum c_stressA[6]
+
+# measure box length (stretch if division by at timestep 0) in direction of tension
+variable lmda equal lINPUT_DIR1
+
+thermo_style    custom step temp press v_sigt c_pA1 c_pA2 c_pA3 c_pA4 c_pA5 c_pA6 v_lmda
+fix 7 all ave/time 5 2000 10000  v_sigt c_pA1 c_pA2 c_pA3 c_pA4 c_pA5 c_pA6 v_lmda mode scalar ave one file SCRATCH_OUT/INPUT_DIR1/uniaxial_tension_INPUT_ERATE_T_TEMPERATURE_INPUT_NAME-avg.out
+
+thermo 500
+timestep	0.0001
+
+# run some pseudo-equilibration to get velocities up again
+run 1000000 # 1e6
+
+# deform the simulation box at a constant rate
+fix             9 all deform 100 INPUT_DIR1 erate INPUT_ERATE INPUT_DIR2 volume INPUT_DIR3 volume remap v
+restart		10000000 ./output/INPUT_DIR1/deformed_restart_1_INPUT_ERATE_T_TEMPERATURE_INPUT_NAME.out ./output/INPUT_DIR1/deformed_restart_2_INPUT_ERATE_T_TEMPERATURE_INPUT_NAME.out
+
+# do deformation
+run 100000 # 1e5
+
+unfix 9
+
+# dump coordinates regularly to externally calculate Rs 
+dump 2 crosslinkers custom 5000 SCRATCH_OUT/INPUT_DIR1/deformed_INPUT_ERATE_T_TEMPERATURE_INPUT_NAME_phantom_crosslinker_coord_dump.lammpstrj.out id x y z ix iy iz
+dump 3 all custom 500000 SCRATCH_OUT/INPUT_DIR1/deformed_INPUT_ERATE_T_TEMPERATURE_INPUT_NAME_phantom_coord_dump.lammpstrj.out id type x y z ix iy iz
+
+# final equilibration
+run 1000000000 # 1e9 (stop imposed earlier, normally)

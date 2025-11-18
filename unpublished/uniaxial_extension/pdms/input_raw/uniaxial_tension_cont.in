@@ -1,0 +1,53 @@
+#LAMMPS input file: Calculate the shear stress
+
+units           lj
+atom_style      angle
+special_bonds   fene
+
+bond_style      fene
+
+pair_style	lj/cut 1.12246
+pair_modify     shift yes
+angle_style fourier/simple
+
+read_restart    RESTART_INPUT_FILE
+
+neighbor        0.4 bin
+neigh_modify    every 1 delay 1
+
+bond_coeff	1 30.0 1.5 1.0 1.0
+angle_coeff 	1 0.013 -1.0 1.0
+pair_coeff  * * 1.0 1.0 1.12246
+
+fix             1 all nve
+fix             2 all langevin 1.0 1.0 0.5 394710 # zero yes
+
+# after first run, we can reduce comm req.
+comm_modify     mode single cutoff 1.9 vel no
+
+# compute tensile/shear stress
+variable        sigt equal -pINPUT_DIR1INPUT_DIR1
+compute stressA all stress/atom NULL
+
+compute pA1 all reduce sum c_stressA[1]
+compute pA2 all reduce sum c_stressA[2]
+compute pA3 all reduce sum c_stressA[3]
+compute pA4 all reduce sum c_stressA[4]
+compute pA5 all reduce sum c_stressA[5]
+compute pA6 all reduce sum c_stressA[6]
+
+thermo_style    custom step temp press v_sigt c_pA1 c_pA2 c_pA3 c_pA4 c_pA5 c_pA6
+fix 6 all ave/time 10 1000 10000  v_sigt c_pA1 c_pA2 c_pA3 c_pA4 c_pA5 c_pA6 mode scalar ave one file ./output/INPUT_DIR1/uniaxial_tension_INPUT_NAME-avg.out
+
+timestep 0.01
+thermo 500
+
+restart		50000 ./output/INPUT_DIR1/deformed_tension_restart_1_INPUT_NAME.out ./output/INPUT_DIR1/deformed_tension_restart_2_INPUT_NAME.out
+
+variable a loop 12
+label loop
+run 1000000
+write_data      SCRATCH_OUT/INPUT_DIR1/deformed_tension_INPUT_NAME_*.structure.out
+next a
+jump SELF loop
+
